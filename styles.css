@@ -154,17 +154,16 @@ h3 { font-size: 0.82rem; margin-bottom: 10px; color: #bbb; display: flex; align-
 .legend-item.db       { background: #1e0d2e; border: 1px solid #a855f7; color: #e2c6ff; }
 
 /* Interactive elements */
-.mermaid-viewer .node { transition: transform 0.2s, filter 0.2s; }
-.mermaid-viewer .node:hover { filter: brightness(1.3); transform: scale(1.02); }
+.mermaid-viewer .node { transition: filter 0.2s; }
+.mermaid-viewer .node:hover { filter: brightness(1.3); }
 
 .interactive-li { 
   cursor: pointer; 
-  transition: all 0.2s ease;
-  border-left: 2px solid transparent;
+  transition: background 0.2s, color 0.2s, border-left-color 0.2s;
+  border-left: 3px solid transparent;
 }
 .interactive-li:hover { 
   background: rgba(0, 255, 136, 0.08) !important; 
-  padding-left: 10px !important;
   border-left-color: #00ff88;
   color: #00ff88 !important;
 }
