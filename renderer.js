@@ -4,7 +4,6 @@ const directoryPathInput = document.getElementById('directoryPath');
 const resultsArea = document.getElementById('results');
 const loader = document.getElementById('loader');
 
-// State
 let currentPath = '';
 let currentResult = null;
 
@@ -13,37 +12,38 @@ mermaid.initialize({
   startOnLoad: false,
   theme: 'dark',
   securityLevel: 'loose',
-  fontFamily: 'Inter',
+  fontFamily: 'Inter, monospace',
+  flowchart: { curve: 'basis', padding: 20 },
 });
 
-// Event Listeners
+// Event: Select directory
 selectDirBtn.addEventListener('click', async () => {
-  const path = await window.electronAPI.openDirectory();
-  if (path) {
-    currentPath = path;
-    directoryPathInput.value = path;
+  const p = await window.electronAPI.openDirectory();
+  if (p) {
+    currentPath = p;
+    directoryPathInput.value = p;
     analyzeBtn.disabled = false;
   }
 });
 
+// Event: Run analysis
 analyzeBtn.addEventListener('click', async () => {
   if (!currentPath) return;
-
   loader.classList.remove('hidden');
   resultsArea.classList.add('hidden');
 
   try {
     const result = await window.electronAPI.analyzeProject(currentPath);
     currentResult = result;
-    displayResults(result);
+    await displayResults(result);
   } catch (error) {
-    alert('Hata oluştu: ' + error.message);
+    alert('Hata: ' + error.message);
   } finally {
     loader.classList.add('hidden');
   }
 });
 
-function displayResults(data) {
+async function displayResults(data) {
   resultsArea.classList.remove('hidden');
 
   // Stats
@@ -53,41 +53,83 @@ function displayResults(data) {
 
   // Tech Stack
   const techContainer = document.getElementById('techStack');
-  techContainer.innerHTML = '';
-  data.techStack.forEach(tech => {
-    const span = document.createElement('span');
-    span.textContent = tech;
-    techContainer.appendChild(span);
-  });
+  techContainer.innerHTML = data.techStack.length
+    ? data.techStack.map(t => `<span>${t}</span>`).join('')
+    : '<span style="color:#666">Tespit edilemedi</span>';
 
-  // Diagram
+  // Detail lists
+  renderDetailList('apiList', data.details.apiRoutes, '🔌');
+  renderDetailList('pageList', data.details.pageRoutes, '📄');
+  renderDetailList('dbList', data.details.dbModels, '📦');
+  renderDetailList('mwList', data.details.middlewares, '⚙️');
+
+  // Component count badge
+  const compEl = document.getElementById('componentCount');
+  if (compEl) compEl.textContent = data.details.components + ' bileşen';
+
+  // Render Mermaid diagram
   const diagramContainer = document.getElementById('mermaidDiagram');
   diagramContainer.innerHTML = '';
-  
-  // Use mermaid to render
-  const id = 'mermaid-' + Date.now();
-  diagramContainer.innerHTML = `<div class="mermaid" id="${id}">${data.flowDiagram}</div>`;
-  mermaid.render(id + '-svg', data.flowDiagram).then(({ svg }) => {
+  try {
+    const { svg } = await mermaid.render('diagram-svg', data.flowDiagram);
     diagramContainer.innerHTML = svg;
-  });
+  } catch (e) {
+    diagramContainer.innerHTML = `<pre style="color:#f97316;font-size:0.75rem;white-space:pre-wrap">${e.message}\n\n${data.flowDiagram}</pre>`;
+  }
 }
 
+function renderDetailList(containerId, items, icon) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  if (!items || items.length === 0) {
+    el.innerHTML = '<li style="color:#555">Bulunamadı</li>';
+    return;
+  }
+  el.innerHTML = items
+    .map(item => `<li title="${item}">${icon} ${item.split('/').pop()}</li>`)
+    .join('');
+}
+
+// Download TXT report
 document.getElementById('downloadBtn').addEventListener('click', () => {
   if (!currentResult) return;
+  const d = currentResult.details;
+  const content = [
+    '=== CodeFlow Architect - Proje Analiz Raporu ===',
+    '',
+    `Proje Yolu   : ${currentPath}`,
+    `Mimari       : ${currentResult.architecture}`,
+    `Teknolojiler : ${currentResult.techStack.join(', ')}`,
+    '',
+    '--- İstatistikler ---',
+    `Toplam Dosya   : ${currentResult.stats.files}`,
+    `Toplam Klasör  : ${currentResult.stats.folders}`,
+    `Bileşen Sayısı : ${d.components}`,
+    '',
+    '--- API Rotaları ---',
+    ...(d.apiRoutes.length ? d.apiRoutes.map(r => '  • ' + r) : ['  (yok)']),
+    '',
+    '--- Sayfa Rotaları ---',
+    ...(d.pageRoutes.length ? d.pageRoutes.map(r => '  • ' + r) : ['  (yok)']),
+    '',
+    '--- Veri Modelleri ---',
+    ...(d.dbModels.length ? d.dbModels.map(r => '  • ' + r) : ['  (yok)']),
+    '',
+    '--- Middleware ---',
+    ...(d.middlewares.length ? d.middlewares.map(r => '  • ' + r) : ['  (yok)']),
+    '',
+    '--- Giriş Noktaları ---',
+    ...(d.entryPoints.length ? d.entryPoints.map(r => '  • ' + r) : ['  (yok)']),
+    '',
+    '--- Akış Diyagramı (Mermaid) ---',
+    currentResult.flowDiagram,
+  ].join('\n');
 
-  const content = `CodeFlow Analysis Report\n\n` +
-    `Path: ${currentPath}\n` +
-    `Architecture: ${currentResult.architecture}\n` +
-    `Tech Stack: ${currentResult.techStack.join(', ')}\n\n` +
-    `Stats:\n` +
-    `- Total Files: ${currentResult.stats.files}\n` +
-    `- Total Folders: ${currentResult.stats.folders}\n\n` +
-    `Diagram Source:\n${currentResult.flowDiagram}`;
-
-  const blob = new Blob([content], { type: 'text/plain' });
+  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = 'project-analysis.txt';
+  a.download = 'codeflow-analysis.txt';
   a.click();
+  URL.revokeObjectURL(url);
 });
