@@ -87,13 +87,18 @@
             <!-- RIGHT: Diagram -->
             <div class="glass-card diagram-panel">
                 <div class="diagram-header">
-                    <h3>🌊 İş Akış Diyagramı <span class="badge">Canlı Tarama</span></h3>
-                    <div class="legend">
-                        <span class="legend-item page">Sayfa</span>
-                        <span class="legend-item api">API</span>
-                        <span class="legend-item server">Servis</span>
-                        <span class="legend-item db">Veri Katmanı</span>
-                        <span class="legend-item mw">Middleware</span>
+                    <div class="diagram-title-row">
+                        <h3>🌊 İş Akış Diyagramı <span class="badge">Canlı Tarama</span></h3>
+                        <div class="diagram-actions">
+                            <div class="legend">
+                                <span class="legend-item page">Sayfa</span>
+                                <span class="legend-item api">API</span>
+                                <span class="legend-item server">Servis</span>
+                                <span class="legend-item db">Veri</span>
+                                <span class="legend-item mw">Middleware</span>
+                            </div>
+                            <button id="downloadImgBtn" class="btn-secondary hidden" style="padding:6px 14px;font-size:0.78rem">🖼 PNG İndir</button>
+                        </div>
                     </div>
                 </div>
                 <div id="mermaidDiagram" class="mermaid-viewer"></div>

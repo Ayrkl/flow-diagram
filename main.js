@@ -258,180 +258,273 @@ function detectArchitecture(fileMap, techStack, { apiRoutes, pageRoutes, compone
   return 'Standard Modular Architecture';
 }
 
+// ---- Sanitize a string for use inside Mermaid node labels ----
+function sanitizeLabel(str) {
+  return str
+    .replace(/"/g, "'")
+    .replace(/[<>{}[\]]/g, '')
+    .replace(/\\/g, '/')
+    .trim();
+}
+
+// ---- Convert a file path to a clean URL-like route label ----
+function toRouteLabel(filePath, stripFile) {
+  let p = filePath.replace(/\\/g, '/');
+  // Remove common prefixes
+  p = p.replace(/^src\//, '').replace(/^app\//, '').replace(/^pages\//, '');
+  // Remove the file itself
+  if (stripFile) p = p.replace(/\/(page|route|index)\.(tsx?|jsx?)$/, '').replace(/\.(tsx?|jsx?)$/, '');
+  // Remove route groups in parens
+  p = p.replace(/\([^)]+\)\//g, '').replace(/\([^)]+\)$/g, '');
+  // Remaining: clean path
+  p = p.replace(/\/+/g, '/').replace(/^\/|\/$/g, '');
+  return p || '/';
+}
+
 // ---- Generate detailed, project-specific Mermaid flowchart ----
 function generateDeepDiagram({ techStack, apiRoutes, pageRoutes, components, serverModules,
   dbModels, middlewares, configFiles, entryPoints, architecture, fileMap, stats }) {
 
   const lines = ['flowchart TD'];
 
-  // Styling
-  lines.push('  classDef page fill:#1a3a2a,stroke:#00ff88,color:#fff');
-  lines.push('  classDef api fill:#1a2a3a,stroke:#00d4ff,color:#fff');
-  lines.push('  classDef db fill:#2a1a3a,stroke:#a855f7,color:#fff');
-  lines.push('  classDef comp fill:#2a2a1a,stroke:#facc15,color:#fff');
-  lines.push('  classDef mw fill:#3a1a1a,stroke:#f97316,color:#fff');
-  lines.push('  classDef entry fill:#0a0a0a,stroke:#00ff88,color:#00ff88,stroke-width:2px');
-  lines.push('  classDef config fill:#1a1a1a,stroke:#666,color:#aaa');
-  lines.push('  classDef server fill:#1a2a2a,stroke:#34d399,color:#fff');
+  // --- Styles ---
+  lines.push('  classDef page fill:#0d2a1a,stroke:#00ff88,color:#ccffd6,stroke-width:1.5px');
+  lines.push('  classDef api fill:#0d1f2e,stroke:#00d4ff,color:#c4eeff,stroke-width:1.5px');
+  lines.push('  classDef db fill:#1e0d2e,stroke:#a855f7,color:#e2c6ff,stroke-width:1.5px');
+  lines.push('  classDef comp fill:#211e00,stroke:#facc15,color:#fff8b3,stroke-width:1px');
+  lines.push('  classDef mw fill:#2e0d0d,stroke:#f97316,color:#ffe0c4,stroke-width:1.5px');
+  lines.push('  classDef server fill:#0d1e1e,stroke:#34d399,color:#b5f5e0,stroke-width:1.5px');
+  lines.push('  classDef entry fill:#050510,stroke:#00ff88,color:#00ff88,stroke-width:2.5px');
+  lines.push('  classDef ext fill:#1a1a0d,stroke:#fde68a,color:#fef3c7,stroke-width:1px');
+  lines.push('  classDef more fill:#151515,stroke:#444,color:#888,stroke-width:1px');
 
-  const hasTechNextjs = techStack.includes('Next.js');
-  const hasTechExpress = techStack.includes('Express') || techStack.includes('Fastify') || techStack.includes('NestJS');
-
-  // ---- Subgraph: Request Entry ----
+  // =============================
+  // 1. ENTRY / REQUEST SUBGRAPH
+  // =============================
   lines.push('');
-  lines.push('  subgraph REQUEST["🌐 İstek Giriş Noktası"]');
-  lines.push('    CLIENT(["👤 Kullanıcı / İstemci"])');
+  lines.push('  subgraph REQUEST["⬇️  Giriş — Kullanıcı İsteği"]');
+  lines.push('    direction TB');
+  lines.push('    CLIENT(["👤 Tarayıcı / İstemci\\nHTTP Talebi Oluştur"])');
+
   if (middlewares.length > 0) {
-    lines.push(`    MW_CHAIN["⚙️ Middleware Zinciri\\n${middlewares.slice(0, 2).map(m => path.basename(m)).join(' → ')}"]`);
+    const mwNames = middlewares.slice(0, 3).map(m => path.basename(m, path.extname(m))).join('  →  ');
+    lines.push(`    MW_CHAIN["⚙️ Middleware Zinciri\\n${sanitizeLabel(mwNames)}\\n(Auth · CORS · Rate Limit · Log)"]`);
+    lines.push('    CLIENT -->|"1. HTTP İsteği"| MW_CHAIN');
   }
   lines.push('  end');
 
-  // ---- Subgraph: Pages / Router ----
+  // =============================
+  // 2. ROUTING / PAGE LAYER
+  // =============================
   if (pageRoutes.length > 0) {
     lines.push('');
-    lines.push('  subgraph PAGES["📄 Sayfa Katmanı (Pages / App Router)"]');
-    const shown = pageRoutes.slice(0, 6);
-    shown.forEach((p, i) => {
-      const label = p.replace(/src\/app\/|src\/pages\//,'').replace('/page.tsx','').replace('/page.jsx','') || '/';
-      const safeId = 'P' + i;
-      lines.push(`    ${safeId}["📄 /${label}"]`);
+    lines.push('  subgraph PAGES["📄  Sayfa Katmanı — App Router"]');
+    lines.push('    direction TB');
+
+    const MAX_SHOWN = Math.min(pageRoutes.length, 7);
+    pageRoutes.slice(0, MAX_SHOWN).forEach((p, i) => {
+      const routeLabel = toRouteLabel(p, true);
+      const fileName = path.basename(p);
+      const id = 'P' + i;
+      lines.push(`    ${id}["📄 /${sanitizeLabel(routeLabel)}\\nServer Component\\n${fileName}"]`);
     });
-    if (pageRoutes.length > 6) {
-      lines.push(`    PMORE["+ ${pageRoutes.length - 6} sayfa daha..."]`);
+    if (pageRoutes.length > MAX_SHOWN) {
+      lines.push(`    PMORE["+ ${pageRoutes.length - MAX_SHOWN} sayfa daha"]`);
     }
     lines.push('  end');
   }
 
-  // ---- Subgraph: API Layer ----
+  // =============================
+  // 3. API LAYER
+  // =============================
   if (apiRoutes.length > 0) {
     lines.push('');
-    lines.push('  subgraph APILAYER["🔌 API Katmanı (Route Handlers)"]');
-    const shownApi = apiRoutes.slice(0, 8);
-    shownApi.forEach((r, i) => {
-      const label = r.replace(/src\/app\//,'').replace('/route.ts','').replace('/route.js','').replace('api/','');
-      const safeId = 'A' + i;
-      const method = r.endsWith('.ts') ? 'GET/POST' : 'HANDLER';
-      lines.push(`    ${safeId}["🔌 /api/${label}\\n[${method}]"]`);
+    lines.push('  subgraph APILAYER["🔌  API Katmanı — Route Handlers"]');
+    lines.push('    direction TB');
+
+    const MAX_API = Math.min(apiRoutes.length, 8);
+    apiRoutes.slice(0, MAX_API).forEach((r, i) => {
+      const routeLabel = toRouteLabel(r, true).replace(/^api\/?/, '');
+      const fileName = path.basename(r);
+      const id = 'A' + i;
+      // Try to detect HTTP method from filename or path hints
+      const isPost = r.includes('create') || r.includes('register') || r.includes('login') || r.includes('submit');
+      const method = isPost ? 'POST · PUT' : 'GET · POST · DELETE';
+      lines.push(`    ${id}["🔌 /api/${sanitizeLabel(routeLabel)}\\n[${method}]\\n${fileName}"]`);
     });
-    if (apiRoutes.length > 8) lines.push(`    AMORE["+ ${apiRoutes.length-8} route daha..."]`);
+    if (apiRoutes.length > MAX_API) {
+      lines.push(`    AMORE["+ ${apiRoutes.length - MAX_API} route daha"]`);
+    }
     lines.push('  end');
   }
 
-  // ---- Subgraph: Server Actions / Services ----
+  // =============================
+  // 4. SERVICE / ACTION LAYER
+  // =============================
   if (serverModules.length > 0) {
     lines.push('');
-    lines.push('  subgraph SERVICES["⚙️ Server Katmanı (Actions / Services)"]');
-    serverModules.slice(0, 5).forEach((s, i) => {
-      const label = path.basename(s, path.extname(s));
-      lines.push(`    SVC${i}["⚙️ ${label}"]`);
+    lines.push('  subgraph SERVICES["⚙️  Servis Katmanı — Business Logic"]');
+    lines.push('    direction TB');
+
+    const MAX_SVC = Math.min(serverModules.length, 6);
+    serverModules.slice(0, MAX_SVC).forEach((s, i) => {
+      const name = path.basename(s, path.extname(s));
+      const type = s.includes('actions') ? 'Server Action' : s.includes('services') ? 'Service' : 'Module';
+      lines.push(`    SVC${i}["⚙️ ${sanitizeLabel(name)}\\n[${type}]\\nİş Mantığı · Validasyon"]`);
     });
+    if (serverModules.length > MAX_SVC) {
+      lines.push(`    SVCMORE["+ ${serverModules.length - MAX_SVC} modül daha"]`);
+    }
     lines.push('  end');
   }
 
-  // ---- Subgraph: DB Layer ----
-  const hasDB = dbModels.length > 0 || techStack.some(t => t.includes('ORM') || t.includes('SQL') || t.includes('Mongo') || t.includes('Redis'));
+  // =============================
+  // 5. DATA LAYER
+  // =============================
+  const hasDB = dbModels.length > 0 || techStack.some(t =>
+    t.includes('Prisma') || t.includes('SQL') || t.includes('Mongo') || t.includes('Redis')
+  );
+
   if (hasDB) {
     lines.push('');
-    lines.push('  subgraph DBLAYER["🗄️ Veri Katmanı"]');
+    lines.push('  subgraph DBLAYER["🗄️  Veri Katmanı — Persistence"]');
+    lines.push('    direction TB');
+
+    if (techStack.includes('Prisma ORM')) {
+      lines.push('    PRISMA[("🔷 Prisma Client\\nORM · Type-Safe\\nSorgu Yap")]');
+    }
+    if (techStack.includes('MongoDB/Mongoose')) {
+      lines.push('    MONGO[("🍃 MongoDB\\nDocument Store\\nNoSQL Veritabanı")]');
+    }
+    if (techStack.includes('PostgreSQL')) {
+      lines.push('    PG[("🐘 PostgreSQL\\nRelational DB\\nSQL Veritabanı")]');
+    }
+    if (techStack.includes('Redis')) {
+      lines.push('    REDIS[("⚡ Redis\\nIn-Memory Cache\\nSession · Rate Limit")]');
+    }
+    // Show model files
     if (dbModels.length > 0) {
-      dbModels.slice(0, 4).forEach((m, i) => {
-        const label = path.basename(m, path.extname(m));
-        lines.push(`    DB${i}["📦 ${label}"]`);
+      const MAX_DB = Math.min(dbModels.length, 3);
+      dbModels.slice(0, MAX_DB).forEach((m, i) => {
+        const name = path.basename(m, path.extname(m));
+        lines.push(`    SCHEMA${i}["📋 ${sanitizeLabel(name)}\\nVeri Modeli · Schema"]`);
       });
     }
-    if (techStack.includes('Prisma ORM')) lines.push('    PRISMA[("🔷 Prisma Client")]');
-    if (techStack.includes('MongoDB/Mongoose')) lines.push('    MONGO[("🍃 MongoDB")]');
-    if (techStack.includes('PostgreSQL')) lines.push('    PG[("🐘 PostgreSQL")]');
-    if (techStack.includes('Redis')) lines.push('    REDIS[("⚡ Redis Cache")]');
     lines.push('  end');
   }
 
-  // ---- Subgraph: External ----
-  const hasExternal = techStack.some(t => ['WebSockets','Auth (NextAuth)','GraphQL'].includes(t));
-  if (hasExternal) {
+  // =============================
+  // 6. EXTERNAL SERVICES
+  // =============================
+  const hasAuth = techStack.includes('Auth (NextAuth)');
+  const hasWs = techStack.includes('WebSockets');
+  const hasGql = techStack.includes('GraphQL');
+
+  if (hasAuth || hasWs || hasGql) {
     lines.push('');
-    lines.push('  subgraph EXTERNAL["🌍 Harici Servisler"]');
-    if (techStack.includes('Auth (NextAuth)')) lines.push('    AUTH["🔐 Auth Provider\\n(NextAuth / OAuth)"]');
-    if (techStack.includes('WebSockets')) lines.push('    WS["📡 WebSocket Server"]');
-    if (techStack.includes('GraphQL')) lines.push('    GQL["🔺 GraphQL Layer"]');
+    lines.push('  subgraph EXTERNAL["🌍  Harici Servisler"]');
+    lines.push('    direction TB');
+    if (hasAuth) lines.push('    AUTH["🔐 Auth Provider\\nNextAuth · OAuth 2.0\\nJWT · Session"]');
+    if (hasWs) lines.push('    WS["📡 WebSocket Server\\nGerçek Zamanlı\\nBidirectional"]');
+    if (hasGql) lines.push('    GQL["🔺 GraphQL\\nApollo Server\\nResolver Katmanı"]');
     lines.push('  end');
   }
 
-  // ---- Connections ----
+  // =============================
+  // CONNECTIONS
+  // =============================
   lines.push('');
 
-  // CLIENT -> Middleware -> Pages
+  // Entry → Pages/API
   if (middlewares.length > 0) {
-    lines.push('  CLIENT -->|HTTP Request| MW_CHAIN');
-    if (pageRoutes.length > 0) lines.push('  MW_CHAIN -->|Geçti| P0');
-    if (apiRoutes.length > 0) lines.push('  MW_CHAIN -->|API İsteği| A0');
+    if (pageRoutes.length > 0) lines.push('  MW_CHAIN -->|"2. Yönlendirme\\n(auth geçti)"| P0');
+    if (apiRoutes.length > 0) lines.push('  MW_CHAIN -->|"2. API Yönlendirme\\n(/api/* eşleşti)"| A0');
   } else {
-    if (pageRoutes.length > 0) lines.push('  CLIENT -->|Sayfa Navigasyonu| P0');
-    if (apiRoutes.length > 0) lines.push('  CLIENT -->|fetch / axios| A0');
+    if (pageRoutes.length > 0) lines.push('  CLIENT -->|"1. GET /route\\nSayfa İsteği"| P0');
+    if (apiRoutes.length > 0) lines.push('  CLIENT -->|"1. fetch() / axios\\nAPI İsteği"| A0');
   }
 
-  // Pages -> API
+  // Pages ↔ API
   if (pageRoutes.length > 0 && apiRoutes.length > 0) {
-    lines.push('  P0 -->|Server Action / fetch| A0');
+    lines.push('  P0 -->|"Server Action\\nया Client fetch()"| A0');
   }
 
-  // Pages / API -> Services
+  // Pages/API → Services
   if (serverModules.length > 0) {
-    if (apiRoutes.length > 0) lines.push('  A0 -->|Çağrı| SVC0');
-    else if (pageRoutes.length > 0) lines.push('  P0 -->|Server Action| SVC0');
+    if (apiRoutes.length > 0) {
+      lines.push('  A0 -->|"İş Mantığı\\nYetki · Doğrulama"| SVC0');
+    } else if (pageRoutes.length > 0) {
+      lines.push('  P0 -->|"Server Action Çağrısı"| SVC0');
+    }
   }
 
-  // Services -> DB
+  // Services / API → DB
   if (hasDB) {
     const srcId = serverModules.length > 0 ? 'SVC0' : apiRoutes.length > 0 ? 'A0' : 'P0';
     if (techStack.includes('Prisma ORM')) {
-      lines.push(`  ${srcId} -->|Sorgu| PRISMA`);
-      if (techStack.includes('PostgreSQL')) lines.push('  PRISMA -->|SQL| PG');
-      else if (techStack.includes('MongoDB/Mongoose')) lines.push('  PRISMA -->|Document| MONGO');
+      lines.push(`  ${srcId} -->|"Prisma Query\\n(findMany · create · update)"| PRISMA`);
+      if (techStack.includes('PostgreSQL')) lines.push('  PRISMA -->|"SQL Çeviri\\nConnection Pool"| PG');
+      if (techStack.includes('MongoDB/Mongoose')) lines.push('  PRISMA -->|"Document Write/Read"| MONGO');
     } else if (techStack.includes('MongoDB/Mongoose')) {
-      lines.push(`  ${srcId} -->|Mongoose Query| MONGO`);
+      lines.push(`  ${srcId} -->|"Mongoose.find()\\n.create() .save()"| MONGO`);
     } else if (techStack.includes('PostgreSQL')) {
-      lines.push(`  ${srcId} -->|SQL Query| PG`);
+      lines.push(`  ${srcId} -->|"SQL Query\\npool.query()"| PG`);
     }
     if (techStack.includes('Redis')) {
-      lines.push(`  ${srcId} -.->|Cache Kontrol| REDIS`);
+      lines.push(`  ${srcId} -.->|"Cache.get()\\nCache.set() TTL"| REDIS`);
     }
+    // Schema → DB connection
     if (dbModels.length > 0) {
-      lines.push(`  DB0 -->|Schema| DB0`);
+      const dbTarget = techStack.includes('Prisma ORM') ? 'PRISMA' : techStack.includes('MongoDB/Mongoose') ? 'MONGO' : techStack.includes('PostgreSQL') ? 'PG' : null;
+      if (dbTarget) lines.push(`  SCHEMA0 -.->|"Schema Tanımı"| ${dbTarget}`);
     }
   }
 
-  // Auth flow
-  if (techStack.includes('Auth (NextAuth)')) {
-    if (middlewares.length > 0) lines.push('  MW_CHAIN -->|Auth Check| AUTH');
-    else if (pageRoutes.length > 0) lines.push('  P0 -.->|Session Check| AUTH');
+  // Auth
+  if (hasAuth) {
+    if (middlewares.length > 0) {
+      lines.push('  MW_CHAIN -->|"JWT Doğrula\\nSession Kontrol"| AUTH');
+      lines.push('  AUTH -.->|"Token · Session"| MW_CHAIN');
+    } else if (pageRoutes.length > 0) {
+      lines.push('  P0 -.->|"getSession()\\nKorumalı Rota"| AUTH');
+    }
   }
 
   // WebSocket
-  if (techStack.includes('WebSockets')) {
-    lines.push('  CLIENT <-->|ws://| WS');
+  if (hasWs) {
+    lines.push('  CLIENT <-->|"ws:// / wss://\\nGerçek Zamanlı Kanal"| WS');
   }
 
-  // API -> GraphQL
-  if (techStack.includes('GraphQL')) {
-    lines.push('  A0 -->|Resolver| GQL');
+  // GraphQL
+  if (hasGql) {
+    if (apiRoutes.length > 0) lines.push('  A0 -->|"GraphQL Query\\nMutation · Subscription"| GQL');
+    if (hasDB && techStack.includes('Prisma ORM')) lines.push('  GQL -->|"Resolver → Prisma"| PRISMA');
   }
 
-  // Apply classes
-  if (middlewares.length > 0) lines.push('  class MW_CHAIN mw');
+  // Response flows back
   if (pageRoutes.length > 0) {
-    pageRoutes.slice(0, 6).forEach((_, i) => lines.push(`  class P${i} page`));
+    lines.push('  P0 -.->|"HTML · RSC Payload\\nHydration"| CLIENT');
   }
   if (apiRoutes.length > 0) {
-    apiRoutes.slice(0, 8).forEach((_, i) => lines.push(`  class A${i} api`));
+    lines.push('  A0 -.->|"JSON Response\\nStatus Code"| CLIENT');
   }
-  if (serverModules.length > 0) {
-    serverModules.slice(0, 5).forEach((_, i) => lines.push(`  class SVC${i} server`));
-  }
-  if (dbModels.length > 0) {
-    dbModels.slice(0, 4).forEach((_, i) => lines.push(`  class DB${i} db`));
-  }
+
+  // =============================
+  // APPLY CLASSES
+  // =============================
   lines.push('  class CLIENT entry');
+  if (middlewares.length > 0) lines.push('  class MW_CHAIN mw');
+  pageRoutes.slice(0, 7).forEach((_, i) => lines.push(`  class P${i} page`));
+  apiRoutes.slice(0, 8).forEach((_, i) => lines.push(`  class A${i} api`));
+  serverModules.slice(0, 6).forEach((_, i) => lines.push(`  class SVC${i} server`));
+  dbModels.slice(0, 3).forEach((_, i) => lines.push(`  class SCHEMA${i} db`));
+  if (hasAuth) lines.push('  class AUTH ext');
+  if (hasWs) lines.push('  class WS ext');
+  if (hasGql) lines.push('  class GQL ext');
+  if (techStack.includes('Prisma ORM')) lines.push('  class PRISMA db');
+  if (techStack.includes('MongoDB/Mongoose')) lines.push('  class MONGO db');
+  if (techStack.includes('PostgreSQL')) lines.push('  class PG db');
+  if (techStack.includes('Redis')) lines.push('  class REDIS db');
 
   return lines.join('\n');
 }

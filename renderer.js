@@ -71,43 +71,53 @@ async function displayResults(data) {
   const diagramContainer = document.getElementById('mermaidDiagram');
   diagramContainer.innerHTML = '';
   try {
-    const { svg } = await mermaid.render('diagram-svg', data.flowDiagram);
+    const uid = 'diagram-' + Date.now();
+    const { svg } = await mermaid.render(uid, data.flowDiagram);
     diagramContainer.innerHTML = svg;
   } catch (e) {
     diagramContainer.innerHTML = `<pre style="color:#f97316;font-size:0.75rem;white-space:pre-wrap">${e.message}\n\n${data.flowDiagram}</pre>`;
   }
+
+  // Show download image button
+  document.getElementById('downloadImgBtn').classList.remove('hidden');
 }
 
-function getMeaningfulLabel(itemPath, icon) {
-  const parts = itemPath.split('/');
+function getMeaningfulLabel(filePath) {
+  const normPath = filePath.replace(/\\/g, '/');
+  const parts = normPath.split('/');
   const filename = parts[parts.length - 1];
 
-  // API route: show parent folders after "api/"
-  if (filename === 'route.ts' || filename === 'route.js') {
-    const apiIdx = parts.indexOf('api');
+  // API route: everything between /api/ and the filename
+  if (filename === 'route.ts' || filename === 'route.js' || filename === 'route.tsx') {
+    const apiIdx = parts.findIndex(p => p === 'api');
     if (apiIdx !== -1) {
       const routeParts = parts
-        .slice(apiIdx + 1, parts.length - 1) // exclude filename
-        .filter(p => !p.startsWith('('));     // exclude (groups)
-      const label = '/' + (routeParts.join('/') || 'root');
-      return { label, tooltip: itemPath };
+        .slice(apiIdx + 1, parts.length - 1)
+        .filter(p => !(p.startsWith('(') && p.endsWith(')')));
+      return { label: '/api/' + (routeParts.join('/') || '…'), tooltip: normPath };
     }
   }
 
-  // Page route: show cleaned path without page.tsx / page.jsx
-  if (filename.startsWith('page.')) {
-    const pageParts = parts
-      .filter(p => !['src', 'app', 'pages'].includes(p))
-      .filter(p => !p.startsWith('page.'))
-      .filter(p => !p.startsWith('(') || p.endsWith(')')) // keep (groups) for tooltip but strip
-      .map(p => p.startsWith('(') && p.endsWith(')') ? null : p)
-      .filter(Boolean);
-    const label = '/' + (pageParts.join('/') || '');
-    return { label: label === '/' ? '/ (Ana Sayfa)' : label, tooltip: itemPath };
+  // Page route: strip known prefixes and route groups
+  if (filename === 'page.tsx' || filename === 'page.ts' || filename === 'page.jsx' || filename === 'page.js') {
+    let capture = false;
+    const pageParts = [];
+    for (const part of parts) {
+      // Start capturing after 'app' or 'pages'
+      if (part === 'app' || part === 'pages') { capture = true; continue; }
+      if (!capture) continue;
+      // Skip the file itself
+      if (part.startsWith('page.')) continue;
+      // Skip route groups like (auth), (protected)
+      if (part.startsWith('(') && part.endsWith(')')) continue;
+      pageParts.push(part);
+    }
+    const routePath = '/' + pageParts.join('/');
+    return { label: pageParts.length === 0 ? '/ (Ana Sayfa)' : routePath, tooltip: normPath };
   }
 
-  // Fallback: just the filename
-  return { label: filename, tooltip: itemPath };
+  // Fallback
+  return { label: filename, tooltip: normPath };
 }
 
 function renderDetailList(containerId, items, icon) {
@@ -119,10 +129,39 @@ function renderDetailList(containerId, items, icon) {
   }
   el.innerHTML = items
     .map(item => {
-      const { label, tooltip } = getMeaningfulLabel(item, icon);
+      const { label, tooltip } = getMeaningfulLabel(item);
       return `<li title="${tooltip}">${icon} ${label}</li>`;
     })
     .join('');
+}
+
+// Download diagram as PNG image
+async function downloadDiagramAsPng() {
+  const svgEl = document.querySelector('#mermaidDiagram svg');
+  if (!svgEl) { alert('Önce analiz yapın.'); return; }
+
+  const svgData = new XMLSerializer().serializeToString(svgEl);
+  const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+  const svgUrl = URL.createObjectURL(svgBlob);
+
+  const img = new Image();
+  img.onload = () => {
+    const scale = 2; // Retina quality
+    const canvas = document.createElement('canvas');
+    canvas.width = img.width * scale;
+    canvas.height = img.height * scale;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#0e0e16';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.scale(scale, scale);
+    ctx.drawImage(img, 0, 0);
+    URL.revokeObjectURL(svgUrl);
+    const link = document.createElement('a');
+    link.download = 'codeflow-diagram.png';
+    link.href = canvas.toDataURL('image/png');
+    link.click();
+  };
+  img.src = svgUrl;
 }
 
 // Download TXT report
@@ -168,3 +207,5 @@ document.getElementById('downloadBtn').addEventListener('click', () => {
   a.click();
   URL.revokeObjectURL(url);
 });
+
+document.getElementById('downloadImgBtn').addEventListener('click', downloadDiagramAsPng);

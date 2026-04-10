@@ -124,7 +124,9 @@ h3 { font-size: 0.82rem; margin-bottom: 10px; color: #bbb; display: flex; align-
 
 /* Diagram panel */
 .diagram-panel { display: flex; flex-direction: column; gap: 14px; overflow: hidden; min-height: 0; }
-.diagram-header { display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
+.diagram-header { display: flex; flex-direction: column; gap: 10px; flex-shrink: 0; }
+.diagram-title-row { display: flex; align-items: center; justify-content: space-between; }
+.diagram-actions { display: flex; align-items: center; gap: 10px; }
 .badge { font-size: 0.65rem; background: rgba(0,255,136,0.1); border: 1px solid rgba(0,255,136,0.25); color: var(--accent); padding: 2px 8px; border-radius: 20px; margin-left: 8px; }
 
 .legend { display: flex; gap: 10px; align-items: center; }
