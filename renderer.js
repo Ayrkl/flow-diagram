@@ -58,10 +58,10 @@ async function displayResults(data) {
     : '<span style="color:#666">Tespit edilemedi</span>';
 
   // Detail lists
-  renderDetailList('apiList', data.details.apiRoutes, '🔌');
-  renderDetailList('pageList', data.details.pageRoutes, '📄');
-  renderDetailList('dbList', data.details.dbModels, '📦');
-  renderDetailList('mwList', data.details.middlewares, '⚙️');
+  renderDetailList('apiList', data.details.apiRoutes, data.details.fullPaths.apiRoutes, '🔌');
+  renderDetailList('pageList', data.details.pageRoutes, data.details.fullPaths.pageRoutes, '📄');
+  renderDetailList('dbList', data.details.dbModels, data.details.fullPaths.dbModels, '📦');
+  renderDetailList('mwList', data.details.middlewares, data.details.fullPaths.middlewares, '⚙️');
 
   // Component count badge
   const compEl = document.getElementById('componentCount');
@@ -74,6 +74,9 @@ async function displayResults(data) {
     const uid = 'diagram-' + Date.now();
     const { svg } = await mermaid.render(uid, data.flowDiagram);
     diagramContainer.innerHTML = svg;
+
+    // Attach click listeners to diagram nodes
+    attachDiagramListeners(data.nodePathMap);
   } catch (e) {
     diagramContainer.innerHTML = `<pre style="color:#f97316;font-size:0.75rem;white-space:pre-wrap">${e.message}\n\n${data.flowDiagram}</pre>`;
   }
@@ -82,12 +85,34 @@ async function displayResults(data) {
   document.getElementById('downloadImgBtn').classList.remove('hidden');
 }
 
+// Function to attach click listeners to Merit nodes
+function attachDiagramListeners(nodePathMap) {
+  const nodes = document.querySelectorAll('.mermaid-viewer .node');
+  nodes.forEach(node => {
+    // Mermaid node IDs are typically prefixed or cleaned, but often correspond to the ID in the DSL
+    // We can use the ID attribute or data-id if available (Mermaid 10+ uses different attributes)
+    const id = node.id.split('-')[1] || node.id; 
+    
+    // Some versions of Mermaid might use different ID formats. Let's try to find a match.
+    // Usually, if we defined 'P0', the node ID might be 'P0' or the SVG element will have a class/id like 'flowchart-P0-...'
+    
+    // Easier way: look for the ID in our map
+    Object.keys(nodePathMap).forEach(key => {
+        if (node.id.includes(key)) {
+            node.style.cursor = 'pointer';
+            node.addEventListener('click', () => {
+                window.electronAPI.openFile(nodePathMap[key]);
+            });
+        }
+    });
+  });
+}
+
 function getMeaningfulLabel(filePath) {
   const normPath = filePath.replace(/\\/g, '/');
   const parts = normPath.split('/');
   const filename = parts[parts.length - 1];
 
-  // API route: everything between /api/ and the filename
   if (filename === 'route.ts' || filename === 'route.js' || filename === 'route.tsx') {
     const apiIdx = parts.findIndex(p => p === 'api');
     if (apiIdx !== -1) {
@@ -98,17 +123,13 @@ function getMeaningfulLabel(filePath) {
     }
   }
 
-  // Page route: strip known prefixes and route groups
   if (filename === 'page.tsx' || filename === 'page.ts' || filename === 'page.jsx' || filename === 'page.js') {
     let capture = false;
     const pageParts = [];
     for (const part of parts) {
-      // Start capturing after 'app' or 'pages'
       if (part === 'app' || part === 'pages') { capture = true; continue; }
       if (!capture) continue;
-      // Skip the file itself
       if (part.startsWith('page.')) continue;
-      // Skip route groups like (auth), (protected)
       if (part.startsWith('(') && part.endsWith(')')) continue;
       pageParts.push(part);
     }
@@ -116,52 +137,54 @@ function getMeaningfulLabel(filePath) {
     return { label: pageParts.length === 0 ? '/ (Ana Sayfa)' : routePath, tooltip: normPath };
   }
 
-  // Fallback
   return { label: filename, tooltip: normPath };
 }
 
-function renderDetailList(containerId, items, icon) {
+function renderDetailList(containerId, routes, fullPaths, icon) {
   const el = document.getElementById(containerId);
   if (!el) return;
-  if (!items || items.length === 0) {
+  if (!routes || routes.length === 0) {
     el.innerHTML = '<li style="color:#555">Bulunamadı</li>';
     return;
   }
-  el.innerHTML = items
-    .map(item => {
-      const { label, tooltip } = getMeaningfulLabel(item);
-      return `<li title="${tooltip}">${icon} ${label}</li>`;
-    })
-    .join('');
+  
+  el.innerHTML = '';
+  routes.forEach((route, i) => {
+    const { label, tooltip } = getMeaningfulLabel(route);
+    const li = document.createElement('li');
+    li.title = tooltip;
+    li.className = 'interactive-li';
+    li.innerHTML = `${icon} ${label}`;
+    
+    // Click to open
+    li.addEventListener('click', () => {
+      const absPath = currentResult.baseDir + '/' + fullPaths[i];
+      window.electronAPI.openFile(absPath.replace(/\/\//g, '/'));
+    });
+    
+    el.appendChild(li);
+  });
 }
 
-// Download diagram as PNG image
+// Download diagram as PNG
 async function downloadDiagramAsPng() {
   const svgEl = document.querySelector('#mermaidDiagram svg');
-  if (!svgEl) { alert('\u00d6nce analiz yap\u0131n.'); return; }
-
+  if (!svgEl) return;
   try {
-    // Clone SVG and add explicit dimensions so canvas can measure it
     const bbox = svgEl.getBoundingClientRect();
     const w = Math.round(bbox.width) || 1200;
     const h = Math.round(bbox.height) || 800;
-
     const clone = svgEl.cloneNode(true);
     clone.setAttribute('width', w);
     clone.setAttribute('height', h);
-    clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-
-    // Encode as data URL (avoids Electron blob URL cross-origin issues)
     const svgStr = new XMLSerializer().serializeToString(clone);
     const encoded = encodeURIComponent(svgStr);
     const dataUrl = 'data:image/svg+xml,' + encoded;
-
     const img = new Image();
     img.onload = () => {
       const scale = 2;
       const canvas = document.createElement('canvas');
-      canvas.width = w * scale;
-      canvas.height = h * scale;
+      canvas.width = w * scale; canvas.height = h * scale;
       const ctx = canvas.getContext('2d');
       ctx.fillStyle = '#0d0d1a';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -172,22 +195,8 @@ async function downloadDiagramAsPng() {
       link.href = canvas.toDataURL('image/png');
       link.click();
     };
-    img.onerror = () => {
-      // Fallback: save as SVG instead
-      const blob = new Blob([svgStr], { type: 'image/svg+xml;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'codeflow-diagram.svg';
-      a.click();
-      URL.revokeObjectURL(url);
-      alert('PNG dönü\u015fümü ba\u015far\u0131s\u0131z. SVG olarak kaydedildi.');
-    };
     img.src = dataUrl;
-  } catch (err) {
-    console.error('PNG download error:', err);
-    alert('PNG indirme hatas\u0131: ' + err.message);
-  }
+  } catch (err) { console.error(err); }
 }
 
 // Download TXT report
@@ -195,43 +204,23 @@ document.getElementById('downloadBtn').addEventListener('click', () => {
   if (!currentResult) return;
   const d = currentResult.details;
   const content = [
-    '=== CodeFlow Architect - Proje Analiz Raporu ===',
+    '=== CodeFlow Architect - Analiz Raporu ===',
+    `Yol: ${currentPath}\nMimari: ${currentResult.architecture}`,
+    `Teknoloji: ${currentResult.techStack.join(', ')}`,
     '',
-    `Proje Yolu   : ${currentPath}`,
-    `Mimari       : ${currentResult.architecture}`,
-    `Teknolojiler : ${currentResult.techStack.join(', ')}`,
+    '--- Rotalar ---',
+    ...d.apiRoutes.map(r => ' • ' + r),
     '',
-    '--- İstatistikler ---',
-    `Toplam Dosya   : ${currentResult.stats.files}`,
-    `Toplam Klasör  : ${currentResult.stats.folders}`,
-    `Bileşen Sayısı : ${d.components}`,
+    '--- Sayfalar ---',
+    ...d.pageRoutes.map(r => ' • ' + r),
     '',
-    '--- API Rotaları ---',
-    ...(d.apiRoutes.length ? d.apiRoutes.map(r => '  • ' + r) : ['  (yok)']),
-    '',
-    '--- Sayfa Rotaları ---',
-    ...(d.pageRoutes.length ? d.pageRoutes.map(r => '  • ' + r) : ['  (yok)']),
-    '',
-    '--- Veri Modelleri ---',
-    ...(d.dbModels.length ? d.dbModels.map(r => '  • ' + r) : ['  (yok)']),
-    '',
-    '--- Middleware ---',
-    ...(d.middlewares.length ? d.middlewares.map(r => '  • ' + r) : ['  (yok)']),
-    '',
-    '--- Giriş Noktaları ---',
-    ...(d.entryPoints.length ? d.entryPoints.map(r => '  • ' + r) : ['  (yok)']),
-    '',
-    '--- Akış Diyagramı (Mermaid) ---',
-    currentResult.flowDiagram,
+    '--- Diyagram ---',
+    currentResult.flowDiagram
   ].join('\n');
-
-  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+  const blob = new Blob([content], { type: 'text/plain' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  a.href = url;
-  a.download = 'codeflow-analysis.txt';
-  a.click();
-  URL.revokeObjectURL(url);
+  a.href = url; a.download = 'codeflow-analiz.txt'; a.click();
 });
 
 document.getElementById('downloadImgBtn').addEventListener('click', downloadDiagramAsPng);

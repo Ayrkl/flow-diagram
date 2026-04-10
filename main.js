@@ -1,7 +1,8 @@
-const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 const path = require('path');
 const fs = require('fs').promises;
 const fsSync = require('fs');
+const { exec } = require('child_process');
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -43,6 +44,17 @@ ipcMain.handle('analyze-project', async (event, directoryPath) => {
   } catch (error) {
     throw new Error(error.message || 'Analiz başarısız');
   }
+});
+
+// IPC handler to open a file in IDE (VS Code or default)
+ipcMain.handle('open-file', async (event, filePath) => {
+  if (!filePath) return;
+  const fullPath = filePath; 
+  exec(`code "${fullPath}"`, (err) => {
+    if (err) {
+      shell.openPath(fullPath);
+    }
+  });
 });
 
 // ============================================================
@@ -100,8 +112,8 @@ async function analyzeProject(baseDir) {
     throw new Error('Dizin okunamadı: ' + e.message);
   }
 
-  // ---- 2. DEEP SCAN: Collect files and read import graphs ----
-  const fileMap = {};       // relative path -> { imports: [], exports: [], type }
+  // ---- 2. DEEP SCAN ----
+  const fileMap = {};
   const apiRoutes = [];
   const pageRoutes = [];
   const components = [];
@@ -130,61 +142,42 @@ async function analyzeProject(baseDir) {
         const ext = path.extname(entry.name).toLowerCase();
         if (ext) stats.languages[ext] = (stats.languages[ext] || 0) + 1;
 
-        // Categorize file
         const lower = relPath.toLowerCase();
         let fileType = 'other';
 
-        // API Routes
         if (lower.includes('/api/') && (lower.endsWith('route.ts') || lower.endsWith('route.js') || lower.endsWith('index.ts') || lower.endsWith('index.js'))) {
           apiRoutes.push(relPath);
           fileType = 'api';
         }
-        // Page routes
         else if (lower.endsWith('page.tsx') || lower.endsWith('page.jsx') || lower.endsWith('page.js') || lower.endsWith('page.ts')) {
           pageRoutes.push(relPath);
           fileType = 'page';
         }
-        // Layout files
-        else if (entry.name.toLowerCase().startsWith('layout.')) {
-          fileType = 'layout';
-        }
-        // Components
         else if (lower.includes('/components/') || lower.includes('/ui/') || lower.endsWith('.tsx') || lower.endsWith('.jsx')) {
           components.push(relPath);
           fileType = 'component';
         }
-        // Server / actions / services
         else if (lower.includes('/actions/') || lower.includes('/services/') || lower.includes('/server/') || lower.endsWith('.server.ts')) {
           serverModules.push(relPath);
           fileType = 'server';
         }
-        // DB / Models
         else if (lower.includes('/models/') || lower.includes('/schema') || lower.includes('/prisma') || entry.name === 'schema.prisma') {
           dbModels.push(relPath);
           fileType = 'model';
         }
-        // Middleware
         else if (lower.includes('middleware') && SOURCE_EXTENSIONS.has(ext)) {
           middlewares.push(relPath);
           fileType = 'middleware';
         }
-        // Config
-        else if (entry.name.match(/\.(config|env|json|yaml|yml|toml)$/i) && !entry.name.startsWith('.')) {
-          configFiles.push(relPath);
-          fileType = 'config';
-        }
 
-        // Entry points
         if (['main.ts','main.js','index.ts','index.js','server.ts','server.js','app.ts','app.js'].includes(entry.name) && depth <= 2) {
           entryPoints.push(relPath);
         }
 
         if (SOURCE_EXTENSIONS.has(ext)) {
-          // Read imports
           try {
             const content = await fs.readFile(fullPath, 'utf-8');
-            const imports = extractImports(content);
-            fileMap[relPath] = { imports, type: fileType };
+            fileMap[relPath] = { imports: [], type: fileType };
           } catch {
             fileMap[relPath] = { imports: [], type: fileType };
           }
@@ -195,11 +188,10 @@ async function analyzeProject(baseDir) {
 
   await walk(baseDir);
 
-  // ---- 3. ARCHITECTURE DETECTION ----
   let architecture = detectArchitecture(fileMap, techStack, { apiRoutes, pageRoutes, components, dbModels, middlewares });
 
-  // ---- 4. GENERATE DEEP MERMAID DIAGRAM ----
-  const flowDiagram = generateDeepDiagram({
+  const { flowDiagram, nodePathMap } = generateDeepDiagram({
+    baseDir,
     techStack: Array.from(techStack),
     apiRoutes, pageRoutes, components, serverModules,
     dbModels, middlewares, configFiles, entryPoints,
@@ -207,9 +199,11 @@ async function analyzeProject(baseDir) {
   });
 
   return {
+    baseDir,
     techStack: Array.from(techStack),
     architecture,
     flowDiagram,
+    nodePathMap,
     stats,
     details: {
       apiRoutes: apiRoutes.map(r => r.replace(/^src\//, '')),
@@ -217,308 +211,129 @@ async function analyzeProject(baseDir) {
       components: components.length,
       dbModels,
       middlewares,
-      entryPoints
+      entryPoints,
+      fullPaths: { apiRoutes, pageRoutes, dbModels, middlewares }
     }
   };
 }
 
-// ---- Extract import paths from source file content ----
-function extractImports(content) {
-  const imports = [];
-  const patterns = [
-    /import\s+.*?\s+from\s+['"]([^'"]+)['"]/g,
-    /require\(['"]([^'"]+)['"]\)/g,
-    /import\(['"]([^'"]+)['"]\)/g,
-  ];
-  for (const pattern of patterns) {
-    let m;
-    while ((m = pattern.exec(content)) !== null) {
-      imports.push(m[1]);
-    }
-  }
-  return imports;
-}
-
-// ---- Architecture detection heuristic ----
 function detectArchitecture(fileMap, techStack, { apiRoutes, pageRoutes, components, dbModels, middlewares }) {
-  if (techStack.has('Next.js')) {
-    const hasAppDir = Object.keys(fileMap).some(f => f.startsWith('src/app/') || f.startsWith('app/'));
-    const hasPagesDir = Object.keys(fileMap).some(f => f.startsWith('src/pages/') || f.startsWith('pages/'));
-    if (hasAppDir) return 'Next.js App Router Architecture';
-    if (hasPagesDir) return 'Next.js Pages Router Architecture';
-    return 'Next.js Architecture';
-  }
+  if (techStack.has('Next.js')) return 'Next.js Architecture';
   if (techStack.has('NestJS')) return 'NestJS Module Architecture';
   if (techStack.has('Express')) return 'Express MVC Architecture';
-  if (techStack.has('Fastify')) return 'Fastify Plugin Architecture';
-  if (techStack.has('Go')) return 'Go Service Architecture';
-  if (techStack.has('Python')) return 'Python Application Architecture';
-  if (techStack.has('Vue.js')) return 'Vue.js SPA Architecture';
-  if (dbModels.length > 0 && apiRoutes.length > 0) return 'API + Data Model Architecture';
   return 'Standard Modular Architecture';
 }
 
-// ---- Sanitize a string for use inside Mermaid node labels ----
 function sanitizeLabel(str) {
-  return str
-    .replace(/"/g, "'")
-    .replace(/[<>{}[\]]/g, '')
-    .replace(/\\/g, '/')
-    .trim();
+  return str.replace(/"/g, "'").replace(/[<>{}[\]]/g, '').replace(/\\/g, '/').trim();
 }
 
-// ---- Convert a file path to a clean URL-like route label ----
 function toRouteLabel(filePath, stripFile) {
   let p = filePath.replace(/\\/g, '/');
-  // Remove common prefixes
   p = p.replace(/^src\//, '').replace(/^app\//, '').replace(/^pages\//, '');
-  // Remove the file itself
   if (stripFile) p = p.replace(/\/(page|route|index)\.(tsx?|jsx?)$/, '').replace(/\.(tsx?|jsx?)$/, '');
-  // Remove route groups in parens
   p = p.replace(/\([^)]+\)\//g, '').replace(/\([^)]+\)$/g, '');
-  // Remaining: clean path
   p = p.replace(/\/+/g, '/').replace(/^\/|\/$/g, '');
   return p || '/';
 }
 
-// ---- Generate detailed, project-specific Mermaid flowchart ----
-function generateDeepDiagram({ techStack, apiRoutes, pageRoutes, components, serverModules,
+// RESTORED: Categorical "Architecture Layer" diagram engine
+function generateDeepDiagram({ baseDir, techStack, apiRoutes, pageRoutes, components, serverModules,
   dbModels, middlewares, configFiles, entryPoints, architecture, fileMap, stats }) {
 
   const lines = ['flowchart LR'];
+  const nodePathMap = {};
 
-  // --- Styles ---
+  // Styles
   lines.push('  classDef page fill:#0d2a1a,stroke:#00ff88,color:#ccffd6,stroke-width:1.5px');
   lines.push('  classDef api fill:#0d1f2e,stroke:#00d4ff,color:#c4eeff,stroke-width:1.5px');
   lines.push('  classDef db fill:#1e0d2e,stroke:#a855f7,color:#e2c6ff,stroke-width:1.5px');
-  lines.push('  classDef comp fill:#211e00,stroke:#facc15,color:#fff8b3,stroke-width:1px');
   lines.push('  classDef mw fill:#2e0d0d,stroke:#f97316,color:#ffe0c4,stroke-width:1.5px');
   lines.push('  classDef server fill:#0d1e1e,stroke:#34d399,color:#b5f5e0,stroke-width:1.5px');
   lines.push('  classDef entry fill:#050510,stroke:#00ff88,color:#00ff88,stroke-width:2.5px');
-  lines.push('  classDef ext fill:#1a1a0d,stroke:#fde68a,color:#fef3c7,stroke-width:1px');
-  lines.push('  classDef more fill:#151515,stroke:#444,color:#888,stroke-width:1px');
 
-  // =============================
-  // 1. ENTRY / REQUEST SUBGRAPH
-  // =============================
+  // --- Subgraph: Request ---
   lines.push('');
-  lines.push('  subgraph REQUEST["⬇️  Giriş — İstek"]');
-  lines.push('    CLIENT(["👤 Tarayıcı\nHTTP İsteği"])');
-
+  lines.push('  subgraph REQUEST["⬇️ Giriş"]');
+  lines.push('    CLIENT(["👤 Tarayıcı"])');
   if (middlewares.length > 0) {
-    const mwNames = middlewares.slice(0, 3).map(m => path.basename(m, path.extname(m))).join('  →  ');
-    lines.push(`    MW_CHAIN["⚙️ Middleware Zinciri\\n${sanitizeLabel(mwNames)}\\n(Auth · CORS · Rate Limit · Log)"]`);
-    lines.push('    CLIENT -->|"1. HTTP İsteği"| MW_CHAIN');
+    lines.push('    MW_CHAIN["⚙️ Middleware"]');
+    lines.push('    CLIENT --> MW_CHAIN');
+    nodePathMap['MW_CHAIN'] = path.join(baseDir, middlewares[0]);
   }
   lines.push('  end');
 
-  // =============================
-  // 2. ROUTING / PAGE LAYER
-  // =============================
+  // --- Subgraph: Pages ---
   if (pageRoutes.length > 0) {
     lines.push('');
-    lines.push('  subgraph PAGES["📄 Sayfa Katmanı"]');
-
-    const MAX_SHOWN = Math.min(pageRoutes.length, 7);
-    pageRoutes.slice(0, MAX_SHOWN).forEach((p, i) => {
-      const routeLabel = toRouteLabel(p, true);
-      const fileName = path.basename(p);
+    lines.push('  subgraph PAGES["📄 Sayfalar"]');
+    pageRoutes.slice(0, 7).forEach((p, i) => {
       const id = 'P' + i;
-      lines.push(`    ${id}["📄 /${sanitizeLabel(routeLabel)}\\nServer Component\\n${fileName}"]`);
+      lines.push(`    ${id}["📄 /${sanitizeLabel(toRouteLabel(p, true))}"]`);
+      nodePathMap[id] = path.join(baseDir, p);
     });
-    if (pageRoutes.length > MAX_SHOWN) {
-      lines.push(`    PMORE["+ ${pageRoutes.length - MAX_SHOWN} sayfa daha"]`);
-    }
     lines.push('  end');
   }
 
-  // =============================
-  // 3. API LAYER
-  // =============================
+  // --- Subgraph: API ---
   if (apiRoutes.length > 0) {
     lines.push('');
-    lines.push('  subgraph APILAYER["🔌 API Route Handlers"]');
-
-    const MAX_API = Math.min(apiRoutes.length, 8);
-    apiRoutes.slice(0, MAX_API).forEach((r, i) => {
-      const routeLabel = toRouteLabel(r, true).replace(/^api\/?/, '');
-      const fileName = path.basename(r);
+    lines.push('  subgraph APILAYER["🔌 API Rotaları"]');
+    apiRoutes.slice(0, 8).forEach((r, i) => {
       const id = 'A' + i;
-      // Try to detect HTTP method from filename or path hints
-      const isPost = r.includes('create') || r.includes('register') || r.includes('login') || r.includes('submit');
-      const method = isPost ? 'POST · PUT' : 'GET · POST · DELETE';
-      lines.push(`    ${id}["🔌 /api/${sanitizeLabel(routeLabel)}\\n[${method}]\\n${fileName}"]`);
+      lines.push(`    ${id}["🔌 /api/${sanitizeLabel(toRouteLabel(r, true).replace(/^api\/?/, ''))}"]`);
+      nodePathMap[id] = path.join(baseDir, r);
     });
-    if (apiRoutes.length > MAX_API) {
-      lines.push(`    AMORE["+ ${apiRoutes.length - MAX_API} route daha"]`);
-    }
     lines.push('  end');
   }
 
-  // =============================
-  // 4. SERVICE / ACTION LAYER
-  // =============================
+  // --- Subgraph: Services ---
   if (serverModules.length > 0) {
     lines.push('');
-    lines.push('  subgraph SERVICES["⚙️ Servis / Business Logic"]');
-
-    const MAX_SVC = Math.min(serverModules.length, 6);
-    serverModules.slice(0, MAX_SVC).forEach((s, i) => {
-      const name = path.basename(s, path.extname(s));
-      const type = s.includes('actions') ? 'Server Action' : s.includes('services') ? 'Service' : 'Module';
-      lines.push(`    SVC${i}["⚙️ ${sanitizeLabel(name)}\\n[${type}]\\nİş Mantığı · Validasyon"]`);
+    lines.push('  subgraph SERVICES["⚙️ Servisler"]');
+    serverModules.slice(0, 6).forEach((s, i) => {
+      const id = 'SVC' + i;
+      lines.push(`    ${id}["⚙️ ${sanitizeLabel(path.basename(s, path.extname(s)))}"]`);
+      nodePathMap[id] = path.join(baseDir, s);
     });
-    if (serverModules.length > MAX_SVC) {
-      lines.push(`    SVCMORE["+ ${serverModules.length - MAX_SVC} modül daha"]`);
-    }
     lines.push('  end');
   }
 
-  // =============================
-  // 5. DATA LAYER
-  // =============================
-  const hasDB = dbModels.length > 0 || techStack.some(t =>
-    t.includes('Prisma') || t.includes('SQL') || t.includes('Mongo') || t.includes('Redis')
-  );
-
+  // --- Subgraph: Data ---
+  const hasDB = dbModels.length > 0 || techStack.some(t => t.includes('Prisma') || t.includes('SQL') || t.includes('Mongo'));
   if (hasDB) {
     lines.push('');
     lines.push('  subgraph DBLAYER["🗄️ Veri Katmanı"]');
-
-    if (techStack.includes('Prisma ORM')) {
-      lines.push('    PRISMA[("🔷 Prisma Client\\nORM · Type-Safe\\nSorgu Yap")]');
-    }
-    if (techStack.includes('MongoDB/Mongoose')) {
-      lines.push('    MONGO[("🍃 MongoDB\\nDocument Store\\nNoSQL Veritabanı")]');
-    }
-    if (techStack.includes('PostgreSQL')) {
-      lines.push('    PG[("🐘 PostgreSQL\\nRelational DB\\nSQL Veritabanı")]');
-    }
-    if (techStack.includes('Redis')) {
-      lines.push('    REDIS[("⚡ Redis\\nIn-Memory Cache\\nSession · Rate Limit")]');
-    }
-    // Show model files
+    if (techStack.includes('Prisma ORM')) lines.push('    PRISMA[("🔷 Prisma Client")]');
     if (dbModels.length > 0) {
-      const MAX_DB = Math.min(dbModels.length, 3);
-      dbModels.slice(0, MAX_DB).forEach((m, i) => {
-        const name = path.basename(m, path.extname(m));
-        lines.push(`    SCHEMA${i}["📋 ${sanitizeLabel(name)}\\nVeri Modeli · Schema"]`);
+      dbModels.slice(0, 3).forEach((m, i) => {
+        const id = 'SCHEMA' + i;
+        lines.push(`    ${id}["📋 ${sanitizeLabel(path.basename(m, path.extname(m)))}"]`);
+        nodePathMap[id] = path.join(baseDir, m);
       });
     }
     lines.push('  end');
   }
 
-  // =============================
-  // 6. EXTERNAL SERVICES
-  // =============================
-  const hasAuth = techStack.includes('Auth (NextAuth)');
-  const hasWs = techStack.includes('WebSockets');
-  const hasGql = techStack.includes('GraphQL');
-
-  if (hasAuth || hasWs || hasGql) {
-    lines.push('');
-    lines.push('  subgraph EXTERNAL["🌍 Harici Servisler"]');
-    if (hasAuth) lines.push('    AUTH["🔐 Auth Provider\\nNextAuth · OAuth 2.0\\nJWT · Session"]');
-    if (hasWs) lines.push('    WS["📡 WebSocket Server\\nGerçek Zamanlı\\nBidirectional"]');
-    if (hasGql) lines.push('    GQL["🔺 GraphQL\\nApollo Server\\nResolver Katmanı"]');
-    lines.push('  end');
-  }
-
-  // =============================
-  // CONNECTIONS
-  // =============================
+  // Connections
   lines.push('');
+  const entry = middlewares.length > 0 ? 'MW_CHAIN' : 'CLIENT';
+  if (pageRoutes.length > 0) lines.push(`  ${entry} --> P0`);
+  if (apiRoutes.length > 0) lines.push(`  ${entry} --> A0`);
+  if (pageRoutes.length > 0 && apiRoutes.length > 0) lines.push('  P0 -.-> A0');
+  if (apiRoutes.length > 0 && serverModules.length > 0) lines.push('  A0 --> SVC0');
+  if (serverModules.length > 0 && hasDB) lines.push('  SVC0 --> ' + (techStack.includes('Prisma ORM') ? 'PRISMA' : 'SCHEMA0'));
 
-  // Entry → Pages/API
-  if (middlewares.length > 0) {
-    if (pageRoutes.length > 0) lines.push('  MW_CHAIN -->|"2. Yönlendirme\\n(auth geçti)"| P0');
-    if (apiRoutes.length > 0) lines.push('  MW_CHAIN -->|"2. API Yönlendirme\\n(/api/* eşleşti)"| A0');
-  } else {
-    if (pageRoutes.length > 0) lines.push('  CLIENT -->|"1. GET /route\\nSayfa İsteği"| P0');
-    if (apiRoutes.length > 0) lines.push('  CLIENT -->|"1. fetch() / axios\\nAPI İsteği"| A0');
-  }
-
-  // Pages ↔ API
-  if (pageRoutes.length > 0 && apiRoutes.length > 0) {
-    lines.push('  P0 -->|"Server Action\\nया Client fetch()"| A0');
-  }
-
-  // Pages/API → Services
-  if (serverModules.length > 0) {
-    if (apiRoutes.length > 0) {
-      lines.push('  A0 -->|"İş Mantığı\\nYetki · Doğrulama"| SVC0');
-    } else if (pageRoutes.length > 0) {
-      lines.push('  P0 -->|"Server Action Çağrısı"| SVC0');
-    }
-  }
-
-  // Services / API → DB
-  if (hasDB) {
-    const srcId = serverModules.length > 0 ? 'SVC0' : apiRoutes.length > 0 ? 'A0' : 'P0';
-    if (techStack.includes('Prisma ORM')) {
-      lines.push(`  ${srcId} -->|"Prisma Query\\n(findMany · create · update)"| PRISMA`);
-      if (techStack.includes('PostgreSQL')) lines.push('  PRISMA -->|"SQL Çeviri\\nConnection Pool"| PG');
-      if (techStack.includes('MongoDB/Mongoose')) lines.push('  PRISMA -->|"Document Write/Read"| MONGO');
-    } else if (techStack.includes('MongoDB/Mongoose')) {
-      lines.push(`  ${srcId} -->|"Mongoose.find()\\n.create() .save()"| MONGO`);
-    } else if (techStack.includes('PostgreSQL')) {
-      lines.push(`  ${srcId} -->|"SQL Query\\npool.query()"| PG`);
-    }
-    if (techStack.includes('Redis')) {
-      lines.push(`  ${srcId} -.->|"Cache.get()\\nCache.set() TTL"| REDIS`);
-    }
-    // Schema → DB connection
-    if (dbModels.length > 0) {
-      const dbTarget = techStack.includes('Prisma ORM') ? 'PRISMA' : techStack.includes('MongoDB/Mongoose') ? 'MONGO' : techStack.includes('PostgreSQL') ? 'PG' : null;
-      if (dbTarget) lines.push(`  SCHEMA0 -.->|"Schema Tanımı"| ${dbTarget}`);
-    }
-  }
-
-  // Auth
-  if (hasAuth) {
-    if (middlewares.length > 0) {
-      lines.push('  MW_CHAIN -->|"JWT Doğrula\\nSession Kontrol"| AUTH');
-      lines.push('  AUTH -.->|"Token · Session"| MW_CHAIN');
-    } else if (pageRoutes.length > 0) {
-      lines.push('  P0 -.->|"getSession()\\nKorumalı Rota"| AUTH');
-    }
-  }
-
-  // WebSocket
-  if (hasWs) {
-    lines.push('  CLIENT <-->|"ws:// / wss://\\nGerçek Zamanlı Kanal"| WS');
-  }
-
-  // GraphQL
-  if (hasGql) {
-    if (apiRoutes.length > 0) lines.push('  A0 -->|"GraphQL Query\\nMutation · Subscription"| GQL');
-    if (hasDB && techStack.includes('Prisma ORM')) lines.push('  GQL -->|"Resolver → Prisma"| PRISMA');
-  }
-
-  // Response flows back
-  if (pageRoutes.length > 0) {
-    lines.push('  P0 -.->|"HTML · RSC Payload\\nHydration"| CLIENT');
-  }
-  if (apiRoutes.length > 0) {
-    lines.push('  A0 -.->|"JSON Response\\nStatus Code"| CLIENT');
-  }
-
-  // =============================
-  // APPLY CLASSES
-  // =============================
+  // Classes
   lines.push('  class CLIENT entry');
   if (middlewares.length > 0) lines.push('  class MW_CHAIN mw');
   pageRoutes.slice(0, 7).forEach((_, i) => lines.push(`  class P${i} page`));
   apiRoutes.slice(0, 8).forEach((_, i) => lines.push(`  class A${i} api`));
   serverModules.slice(0, 6).forEach((_, i) => lines.push(`  class SVC${i} server`));
-  dbModels.slice(0, 3).forEach((_, i) => lines.push(`  class SCHEMA${i} db`));
-  if (hasAuth) lines.push('  class AUTH ext');
-  if (hasWs) lines.push('  class WS ext');
-  if (hasGql) lines.push('  class GQL ext');
-  if (techStack.includes('Prisma ORM')) lines.push('  class PRISMA db');
-  if (techStack.includes('MongoDB/Mongoose')) lines.push('  class MONGO db');
-  if (techStack.includes('PostgreSQL')) lines.push('  class PG db');
-  if (techStack.includes('Redis')) lines.push('  class REDIS db');
+  if (hasDB) {
+    if (techStack.includes('Prisma ORM')) lines.push('  class PRISMA db');
+    dbModels.slice(0, 3).forEach((_, i) => lines.push(`  class SCHEMA${i} db`));
+  }
 
-  return lines.join('\n');
+  return { flowDiagram: lines.join('\n'), nodePathMap };
 }

@@ -147,11 +147,27 @@ h3 { font-size: 0.82rem; margin-bottom: 10px; color: #bbb; display: flex; align-
 
 .legend { display: flex; gap: 10px; align-items: center; }
 .legend-item { font-size: 0.65rem; padding: 2px 8px; border-radius: 4px; }
-.legend-item.page   { background: #1a3a2a; border: 1px solid #00ff88; color: #fff; }
-.legend-item.api    { background: #1a2a3a; border: 1px solid #00d4ff; color: #fff; }
-.legend-item.server { background: #1a2a2a; border: 1px solid #34d399; color: #fff; }
-.legend-item.db     { background: #2a1a3a; border: 1px solid #a855f7; color: #fff; }
-.legend-item.mw     { background: #3a1a1a; border: 1px solid #f97316; color: #fff; }
+.legend-item.start    { background: #0d3320; border: 1px solid #00ff88; color: #ccffd6; }
+.legend-item.io       { background: #0a2030; border: 1px solid #00d4ff; color: #b8e8ff; }
+.legend-item.decision { background: #2e1800; border: 1px solid #f97316; color: #ffe0c4; }
+.legend-item.process  { background: #0d1e2e; border: 1px solid #3b82f6; color: #bfdbfe; }
+.legend-item.db       { background: #1e0d2e; border: 1px solid #a855f7; color: #e2c6ff; }
+
+/* Interactive elements */
+.mermaid-viewer .node { transition: transform 0.2s, filter 0.2s; }
+.mermaid-viewer .node:hover { filter: brightness(1.3); transform: scale(1.02); }
+
+.interactive-li { 
+  cursor: pointer; 
+  transition: all 0.2s ease;
+  border-left: 2px solid transparent;
+}
+.interactive-li:hover { 
+  background: rgba(0, 255, 136, 0.08) !important; 
+  padding-left: 10px !important;
+  border-left-color: #00ff88;
+  color: #00ff88 !important;
+}
 
 .mermaid-viewer {
   flex: 1; overflow: auto;
