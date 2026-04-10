@@ -78,6 +78,38 @@ async function displayResults(data) {
   }
 }
 
+function getMeaningfulLabel(itemPath, icon) {
+  const parts = itemPath.split('/');
+  const filename = parts[parts.length - 1];
+
+  // API route: show parent folders after "api/"
+  if (filename === 'route.ts' || filename === 'route.js') {
+    const apiIdx = parts.indexOf('api');
+    if (apiIdx !== -1) {
+      const routeParts = parts
+        .slice(apiIdx + 1, parts.length - 1) // exclude filename
+        .filter(p => !p.startsWith('('));     // exclude (groups)
+      const label = '/' + (routeParts.join('/') || 'root');
+      return { label, tooltip: itemPath };
+    }
+  }
+
+  // Page route: show cleaned path without page.tsx / page.jsx
+  if (filename.startsWith('page.')) {
+    const pageParts = parts
+      .filter(p => !['src', 'app', 'pages'].includes(p))
+      .filter(p => !p.startsWith('page.'))
+      .filter(p => !p.startsWith('(') || p.endsWith(')')) // keep (groups) for tooltip but strip
+      .map(p => p.startsWith('(') && p.endsWith(')') ? null : p)
+      .filter(Boolean);
+    const label = '/' + (pageParts.join('/') || '');
+    return { label: label === '/' ? '/ (Ana Sayfa)' : label, tooltip: itemPath };
+  }
+
+  // Fallback: just the filename
+  return { label: filename, tooltip: itemPath };
+}
+
 function renderDetailList(containerId, items, icon) {
   const el = document.getElementById(containerId);
   if (!el) return;
@@ -86,7 +118,10 @@ function renderDetailList(containerId, items, icon) {
     return;
   }
   el.innerHTML = items
-    .map(item => `<li title="${item}">${icon} ${item.split('/').pop()}</li>`)
+    .map(item => {
+      const { label, tooltip } = getMeaningfulLabel(item, icon);
+      return `<li title="${tooltip}">${icon} ${label}</li>`;
+    })
     .join('');
 }
 
