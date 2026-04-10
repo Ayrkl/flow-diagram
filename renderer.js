@@ -13,7 +13,13 @@ mermaid.initialize({
   theme: 'dark',
   securityLevel: 'loose',
   fontFamily: 'Inter, monospace',
-  flowchart: { curve: 'basis', padding: 20 },
+  flowchart: { 
+    curve: 'stepAfter', 
+    padding: 30, 
+    nodeSpacing: 60, 
+    rankSpacing: 80,
+    htmlLabels: true
+  },
 });
 
 // Event: Select directory
