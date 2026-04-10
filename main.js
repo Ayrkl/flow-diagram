@@ -285,7 +285,7 @@ function toRouteLabel(filePath, stripFile) {
 function generateDeepDiagram({ techStack, apiRoutes, pageRoutes, components, serverModules,
   dbModels, middlewares, configFiles, entryPoints, architecture, fileMap, stats }) {
 
-  const lines = ['flowchart TD'];
+  const lines = ['flowchart LR'];
 
   // --- Styles ---
   lines.push('  classDef page fill:#0d2a1a,stroke:#00ff88,color:#ccffd6,stroke-width:1.5px');
@@ -302,9 +302,8 @@ function generateDeepDiagram({ techStack, apiRoutes, pageRoutes, components, ser
   // 1. ENTRY / REQUEST SUBGRAPH
   // =============================
   lines.push('');
-  lines.push('  subgraph REQUEST["⬇️  Giriş — Kullanıcı İsteği"]');
-  lines.push('    direction TB');
-  lines.push('    CLIENT(["👤 Tarayıcı / İstemci\\nHTTP Talebi Oluştur"])');
+  lines.push('  subgraph REQUEST["⬇️  Giriş — İstek"]');
+  lines.push('    CLIENT(["👤 Tarayıcı\nHTTP İsteği"])');
 
   if (middlewares.length > 0) {
     const mwNames = middlewares.slice(0, 3).map(m => path.basename(m, path.extname(m))).join('  →  ');
@@ -318,8 +317,7 @@ function generateDeepDiagram({ techStack, apiRoutes, pageRoutes, components, ser
   // =============================
   if (pageRoutes.length > 0) {
     lines.push('');
-    lines.push('  subgraph PAGES["📄  Sayfa Katmanı — App Router"]');
-    lines.push('    direction TB');
+    lines.push('  subgraph PAGES["📄 Sayfa Katmanı"]');
 
     const MAX_SHOWN = Math.min(pageRoutes.length, 7);
     pageRoutes.slice(0, MAX_SHOWN).forEach((p, i) => {
@@ -339,8 +337,7 @@ function generateDeepDiagram({ techStack, apiRoutes, pageRoutes, components, ser
   // =============================
   if (apiRoutes.length > 0) {
     lines.push('');
-    lines.push('  subgraph APILAYER["🔌  API Katmanı — Route Handlers"]');
-    lines.push('    direction TB');
+    lines.push('  subgraph APILAYER["🔌 API Route Handlers"]');
 
     const MAX_API = Math.min(apiRoutes.length, 8);
     apiRoutes.slice(0, MAX_API).forEach((r, i) => {
@@ -363,8 +360,7 @@ function generateDeepDiagram({ techStack, apiRoutes, pageRoutes, components, ser
   // =============================
   if (serverModules.length > 0) {
     lines.push('');
-    lines.push('  subgraph SERVICES["⚙️  Servis Katmanı — Business Logic"]');
-    lines.push('    direction TB');
+    lines.push('  subgraph SERVICES["⚙️ Servis / Business Logic"]');
 
     const MAX_SVC = Math.min(serverModules.length, 6);
     serverModules.slice(0, MAX_SVC).forEach((s, i) => {
@@ -387,8 +383,7 @@ function generateDeepDiagram({ techStack, apiRoutes, pageRoutes, components, ser
 
   if (hasDB) {
     lines.push('');
-    lines.push('  subgraph DBLAYER["🗄️  Veri Katmanı — Persistence"]');
-    lines.push('    direction TB');
+    lines.push('  subgraph DBLAYER["🗄️ Veri Katmanı"]');
 
     if (techStack.includes('Prisma ORM')) {
       lines.push('    PRISMA[("🔷 Prisma Client\\nORM · Type-Safe\\nSorgu Yap")]');
@@ -422,8 +417,7 @@ function generateDeepDiagram({ techStack, apiRoutes, pageRoutes, components, ser
 
   if (hasAuth || hasWs || hasGql) {
     lines.push('');
-    lines.push('  subgraph EXTERNAL["🌍  Harici Servisler"]');
-    lines.push('    direction TB');
+    lines.push('  subgraph EXTERNAL["🌍 Harici Servisler"]');
     if (hasAuth) lines.push('    AUTH["🔐 Auth Provider\\nNextAuth · OAuth 2.0\\nJWT · Session"]');
     if (hasWs) lines.push('    WS["📡 WebSocket Server\\nGerçek Zamanlı\\nBidirectional"]');
     if (hasGql) lines.push('    GQL["🔺 GraphQL\\nApollo Server\\nResolver Katmanı"]');

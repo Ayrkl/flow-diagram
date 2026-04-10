@@ -138,30 +138,56 @@ function renderDetailList(containerId, items, icon) {
 // Download diagram as PNG image
 async function downloadDiagramAsPng() {
   const svgEl = document.querySelector('#mermaidDiagram svg');
-  if (!svgEl) { alert('Önce analiz yapın.'); return; }
+  if (!svgEl) { alert('\u00d6nce analiz yap\u0131n.'); return; }
 
-  const svgData = new XMLSerializer().serializeToString(svgEl);
-  const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
-  const svgUrl = URL.createObjectURL(svgBlob);
+  try {
+    // Clone SVG and add explicit dimensions so canvas can measure it
+    const bbox = svgEl.getBoundingClientRect();
+    const w = Math.round(bbox.width) || 1200;
+    const h = Math.round(bbox.height) || 800;
 
-  const img = new Image();
-  img.onload = () => {
-    const scale = 2; // Retina quality
-    const canvas = document.createElement('canvas');
-    canvas.width = img.width * scale;
-    canvas.height = img.height * scale;
-    const ctx = canvas.getContext('2d');
-    ctx.fillStyle = '#0e0e16';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.scale(scale, scale);
-    ctx.drawImage(img, 0, 0);
-    URL.revokeObjectURL(svgUrl);
-    const link = document.createElement('a');
-    link.download = 'codeflow-diagram.png';
-    link.href = canvas.toDataURL('image/png');
-    link.click();
-  };
-  img.src = svgUrl;
+    const clone = svgEl.cloneNode(true);
+    clone.setAttribute('width', w);
+    clone.setAttribute('height', h);
+    clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+
+    // Encode as data URL (avoids Electron blob URL cross-origin issues)
+    const svgStr = new XMLSerializer().serializeToString(clone);
+    const encoded = encodeURIComponent(svgStr);
+    const dataUrl = 'data:image/svg+xml,' + encoded;
+
+    const img = new Image();
+    img.onload = () => {
+      const scale = 2;
+      const canvas = document.createElement('canvas');
+      canvas.width = w * scale;
+      canvas.height = h * scale;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#0d0d1a';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.scale(scale, scale);
+      ctx.drawImage(img, 0, 0, w, h);
+      const link = document.createElement('a');
+      link.download = 'codeflow-diagram.png';
+      link.href = canvas.toDataURL('image/png');
+      link.click();
+    };
+    img.onerror = () => {
+      // Fallback: save as SVG instead
+      const blob = new Blob([svgStr], { type: 'image/svg+xml;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'codeflow-diagram.svg';
+      a.click();
+      URL.revokeObjectURL(url);
+      alert('PNG dönü\u015fümü ba\u015far\u0131s\u0131z. SVG olarak kaydedildi.');
+    };
+    img.src = dataUrl;
+  } catch (err) {
+    console.error('PNG download error:', err);
+    alert('PNG indirme hatas\u0131: ' + err.message);
+  }
 }
 
 // Download TXT report
