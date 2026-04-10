@@ -119,7 +119,7 @@ function getMeaningfulLabel(filePath) {
       const routeParts = parts
         .slice(apiIdx + 1, parts.length - 1)
         .filter(p => !(p.startsWith('(') && p.endsWith(')')));
-      return { label: '/api/' + (routeParts.join('/') || '…'), tooltip: normPath };
+      return { label: '/api/' + (routeParts.join('/') || '…') + '/' + filename, tooltip: normPath };
     }
   }
 
@@ -134,7 +134,7 @@ function getMeaningfulLabel(filePath) {
       pageParts.push(part);
     }
     const routePath = '/' + pageParts.join('/');
-    return { label: pageParts.length === 0 ? '/ (Ana Sayfa)' : routePath, tooltip: normPath };
+    return { label: (routePath === '/' ? '/' : routePath + '/') + filename, tooltip: normPath };
   }
 
   return { label: filename, tooltip: normPath };

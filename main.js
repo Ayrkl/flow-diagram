@@ -222,13 +222,17 @@ function generateOptimizedDiagram(fileMap, groups, baseDir, techStack) {
   const sanitizeId = (p) => p.replace(/[^a-zA-Z0-9]/g, '_');
   
   const getBreadcrumbName = (p) => {
-    let parts = p.replace(/\.(tsx?|jsx?)$/, '').split('/');
-    // Filter out common naming noise
-    parts = parts.filter(pt => pt !== 'src' && pt !== 'app' && pt !== 'pages' && pt !== 'api');
-    if (parts[parts.length-1] === 'page' || parts[parts.length-1] === 'route') {
-        return parts.slice(-2).join('/');
+    const parts = p.split('/');
+    // Filter out common naming noise from the path but keep it in label if important
+    const filtered = parts.filter(pt => pt !== 'src' && pt !== 'app' && pt !== 'pages' && pt !== 'api');
+    
+    const fileName = parts[parts.length - 1];
+    if (fileName === 'page.tsx' || fileName === 'page.ts' || fileName === 'page.jsx' || fileName === 'page.js' || 
+        fileName === 'route.ts' || fileName === 'route.js') {
+        const folder = parts[parts.length - 2] || '';
+        return (folder ? folder + '/' : '') + fileName;
     }
-    return parts.slice(-1)[0] || 'index';
+    return fileName;
   };
 
   // 1. Anchor Entry Flow
