@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CodeFlow Architect | Desktop</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="animate-fade-in">
+            <div class="logo-container">
+                <div class="logo-icon">⚡</div>
+                <h1><span class="gradient-text">CodeFlow</span> Architect</h1>
+            </div>
+            <p class="subtitle">Masaüstü Proje Analiz Takımı</p>
+        </header>
+
+        <!-- Main Panel -->
+        <main class="animate-fade-in">
+            <section class="glass-card scanner-panel">
+                <div class="input-group">
+                    <label>Proje Dizini</label>
+                    <div class="row">
+                        <input type="text" id="directoryPath" placeholder="Klasör seçin veya yol girin..." readonly>
+                        <button id="selectDirBtn" class="btn-secondary">Klasör Seç</button>
+                    </div>
+                </div>
+                <button id="analyzeBtn" class="btn-primary" disabled>Analizi Başlat</button>
+            </section>
+
+            <div id="results" class="results-grid hidden">
+                <!-- Sidebar Summary -->
+                <aside class="sidebar">
+                    <div class="glass-card stats-card">
+                        <h3>📋 İstatistikler</h3>
+                        <div class="stats-row">
+                            <div class="stat-item">
+                                <span id="fileCount" class="stat-value">-</span>
+                                <span class="stat-label">Dosya</span>
+                            </div>
+                            <div class="stat-item">
+                                <span id="folderCount" class="stat-value">-</span>
+                                <span class="stat-label">Klasör</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="glass-card tech-card">
+                        <h3>🛠️ Teknoloji Yığını</h3>
+                        <div id="techStack" class="tech-tags"></div>
+                    </div>
+
+                    <div class="glass-card arch-card">
+                        <h3>🏗️ Mimari Yapı</h3>
+                        <p id="archName" class="arch-description">-</p>
+                    </div>
+
+                    <button id="downloadBtn" class="btn-secondary w-full">Analizi İndir (.TXT)</button>
+                </aside>
+
+                <!-- Workflow Diagram -->
+                <div class="glass-card diagram-panel">
+                    <h3>🌊 İş Akış Diyagramı</h3>
+                    <div id="mermaidDiagram" class="mermaid-viewer"></div>
+                </div>
+            </div>
+
+            <!-- Loader -->
+            <div id="loader" class="loader-overlay hidden">
+                <div class="spinner"></div>
+                <p>Proje analiz ediliyor...</p>
+            </div>
+        </main>
+    </div>
+    <script src="renderer.js"></script>
+</body>
+</html>
